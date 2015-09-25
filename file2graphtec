@@ -17,6 +17,7 @@ import usb1
 
 device_list = [
   (0x0b4d, 0x1121),     # Silhouette Cameo
+  (0x0b4d, 0x112b),     # Silhouette Cameo 2
   (0x0b4d, 0x1123)      # Silhouette Portrait
 ]
 
