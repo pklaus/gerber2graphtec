@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+
+#
+# json2graphtec
+#
+# Cut stencils from a JSON file using a Graphtec craft/vinyl cutter (e.g. Silhouette Cameo or Portrait)
+#
+# Copyright (c) 2012 Peter Monta <pmonta@gmail.com>
+# Copyright (c) 2015 Philipp Klaus <philipp.l.klaus@web.de>
+#
+
+import sys
+import os
+import string
+import argparse
+import json
+
+def main():
+    #
+    # parse arguments
+    #
+
+    floats = lambda s: map(float,string.split(s,','))
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--offset', type=floats, default=(4,0.5),
+        help='translate to device coordinates x,y (inches) (default: 4,0.5)')
+    parser.add_argument('--border', type=floats, default=(1,1),
+        help='cut a border around the bounding box of the gerber file; 0,0 to disable (default: 1,1)')
+    parser.add_argument('--matrix', type=floats, default=(1,0,0,1),
+        help='transform coordinates by [a b;c d] (default: identity transform 1,0,0,1)')
+    parser.add_argument('--speed', type=floats, default=[2,2],
+        help='use speed s in device units; s2,s3 for multiple passes (default: 2 passes, speed 2 in each pass)')
+    parser.add_argument('--force', type=floats, default=[8,30],
+        help='use force f in device units; f2,f3 for multiple passes')
+    parser.add_argument('--cut_mode', type=int, choices=(0,1), default=0,
+        help='0 for highest accuracy (fine pitch), 1 for highest speed (default: 0)')
+    parser.add_argument('--media_size', type=floats, default=(12,11),
+        help='size of media (default: 12x11 inches)')
+    parser.add_argument('--rotate', type=float, dest='theta', default=0.,
+        help='rotate counterclockwise by theta degrees (default: no rotation)')
+    parser.add_argument('input_filename')
+
+    args = parser.parse_args()
+
+    #
+    # read strokes from JSON file
+    #
+
+    with open(args.input_filename) as input_file:
+        cutting_context = json.load(input_file)
+    #strokes = []
+    #for cut in cutting_context['cuts']:
+    #    if len(cut) == 2:
+    #        strokes.append()
+    #        continue
+    #    if len(cut) < 2:
+    #        logger.warning('Bad data format? A line is defined by at least two points')
+    #        continue
+    #    # we assume longer than two positions
+    #    start_point = cut[0]
+    #    for point in cut[1:]:
+    #        strokes.append([start_point, point])
+    #        start_point = point
+    strokes = cutting_context['cuts']
+
+    #
+    # main program
+    #
+
+    import graphtec
+    import optimize
+
+    g = graphtec.graphtec()
+
+    g.set(media_size=args.media_size)
+    offset, border = args.offset, args.border
+    g.set(offset=(offset[0]+border[0]+0.5,offset[1]+border[1]+0.5))
+    g.set(matrix=args.matrix)
+
+    g.start()
+
+    strokes = optimize.rotate(strokes, args.theta)
+    strokes = optimize.justify(strokes)
+    max_x,max_y = optimize.max_extent(strokes)
+
+    border_path = [
+      (-border[0], -border[1]),
+      (max_x+border[0], -border[1]),
+      (max_x+border[0], max_y+border[1]),
+      (-border[0], max_y+border[1])
+    ]
+
+    for (s,f) in zip(args.speed, args.force):
+      g.set(speed=s, force=f)
+      if args.cut_mode==0:
+        lines = optimize.optimize(strokes, border)
+        for x in lines:
+          g.line(*x)
+        if border[0]!=0 or border[1]!=0:
+          g.closed_path(border_path)
+      else:
+        for s in strokes:
+          g.closed_path(s)
+        if border[0]!=0 or border[1]!=0:
+          g.closed_path(border_path)
+
+    g.end()
+
+if __name__ == "__main__":
+    main()
